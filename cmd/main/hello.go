@@ -215,7 +215,7 @@ func checkBalanceLoop() {
 		// case <-ticker.C:
 		cfg.RWIterateUsers(func(u *xfbbroker.User) bool {
 			if u.Enabled {
-				b, err := xfb.GetCardMoney(u.SessionId, u.YmUserId)
+				s, err := xfb.GetCardMoney(u.SessionId, u.YmUserId)
 				if err != nil {
 					slog.Error("unable to query card balance", "err", err, "name", u.Name)
 					u.Failed++
@@ -224,9 +224,13 @@ func checkBalanceLoop() {
 					}
 					return true
 				}
-				balance, err := strconv.ParseFloat(b, 64)
+				if s == "- - -" {
+					slog.Info(`GetCardMoney returned "- - -"`)
+					return false
+				}
+				balance, err := strconv.ParseFloat(s, 64)
 				if err != nil {
-					slog.Error("unable to parse card balance", "err", err, "name", u.Name, "rawbalance", b)
+					slog.Error("unable to parse card balance", "err", err, "name", u.Name, "rawbalance", s)
 					u.Failed++
 					if u.Failed <= 3 {
 						sendError(u.WeComBotKey, err, u)
