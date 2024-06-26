@@ -1,5 +1,8 @@
 package xfb
 
+type XfbBaseResponse interface {
+	GetStatusCode() int
+}
 type XfbResponse struct {
 	StatusCode int         `json:"statusCode"`
 	Message    string      `json:"message"`
@@ -7,11 +10,19 @@ type XfbResponse struct {
 	SessionId  string      `json:"-"`
 }
 
+func (r *XfbResponse) GetStatusCode() int {
+	return r.StatusCode
+}
+
 type XfbQueryTransResponse struct {
 	StatusCode int     `json:"statusCode"`
 	Total      int     `json:"total"`
 	Rows       []Trans `json:"rows"`
 	Success    bool    `json:"success"`
+}
+
+func (r *XfbQueryTransResponse) GetStatusCode() int {
+	return r.StatusCode
 }
 
 type Trans struct {

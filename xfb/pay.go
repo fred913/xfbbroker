@@ -1,7 +1,6 @@
 package xfb
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,23 +8,24 @@ import (
 )
 
 func GetUserById(token, ymId string) (sessionId string, data map[string]interface{}, err error) {
-	r, err := PostJSON(XfbWebApp+"/user/getUserById", "", map[string]interface{}{
+	var r XfbResponse
+	sessionId, err = Post(XfbWebApp+"/user/getUserById", "", map[string]interface{}{
 		"platform": "WECHAT_H5",
 		"token":    token,
 		"ymId":     ymId,
-	})
+	}, &r)
 	if err != nil {
 		return "", nil, err
 	}
-	sessionId = r.SessionId
 	data = r.Data.(map[string]interface{})
 	return
 }
 
 func GetCardMoney(sessionId, ymId string) (string, error) {
-	r, err := PostJSON(XfbWebApp+"/card/getCardMoney", sessionId, map[string]interface{}{
+	var r XfbResponse
+	_, err := Post(XfbWebApp+"/card/getCardMoney", sessionId, map[string]interface{}{
 		"ymId": ymId,
-	})
+	}, &r)
 	if err != nil {
 		return "", err
 	}
@@ -40,34 +40,26 @@ func GetCardMoney(sessionId, ymId string) (string, error) {
 }
 
 func CardQuerynoPage(sessionId, ymId string, queryTime time.Time) (total int, rows []Trans, err error) {
-	b, _, err := sendPost(XfbWebApp+"/routeauth/auth/route/user/cardQuerynoPage", sessionId, map[string]interface{}{
+	var r XfbQueryTransResponse
+	_, err = Post(XfbWebApp+"/routeauth/auth/route/user/cardQuerynoPage", sessionId, map[string]interface{}{
 		"queryTime": queryTime.Format("20060102"),
 		"ymId":      ymId,
-	})
+	}, &r)
+
 	if err != nil {
 		// TODO err
 		return
 	}
 
-	var r XfbQueryTransResponse
-	err = json.Unmarshal(b, &r)
-	if err != nil {
-		err = fmt.Errorf("unable to unmarshal body: %w", err)
-		return
-	}
-
-	if r.StatusCode == 0 {
-		err = nil
-		total = r.Total
-		rows = r.Rows
-	} else {
-		err = fmt.Errorf("bad statusCode %d from xfb", r.StatusCode)
-	}
+	err = nil
+	total = r.Total
+	rows = r.Rows
 	return
 }
 
 func RechargeOnCard(money, openId, sessionId, ymId string) (string, error) {
-	r, err := PostJSON(XfbWebApp+"/order/rechargeOnCardByParam", sessionId, map[string]interface{}{
+	var r XfbResponse
+	_, err := Post(XfbWebApp+"/order/rechargeOnCardByParam", sessionId, map[string]interface{}{
 		"openid":         openId,
 		"totalMoney":     money,
 		"orderRealMoney": money,
@@ -77,7 +69,7 @@ func RechargeOnCard(money, openId, sessionId, ymId string) (string, error) {
 		"platform":       "WECHAT_H5",
 		"sessionId":      sessionId,
 		"ymId":           ymId,
-	})
+	}, &r)
 	if err != nil {
 		return "", err
 	}
@@ -85,19 +77,21 @@ func RechargeOnCard(money, openId, sessionId, ymId string) (string, error) {
 }
 
 func SignPayCheck(tranNo string) (string, error) {
-	r, err := PostJSON(XfbPay+"/pay/sign/signPayCheck", "", map[string]interface{}{
+	var r XfbResponse
+	_, err := Post(XfbPay+"/pay/sign/signPayCheck", "", map[string]interface{}{
 		"tranNo":  tranNo,
 		"payType": "WXPAY",
-	})
+	}, &r)
 	return r.Message, err
 }
 
 func GetSignUrl(tranNo string) (applyId string, jumpUrl string, err error) {
-	r, err := PostJSON(XfbPay+"/h5/pay/sign/getSignUrl", "", map[string]interface{}{
+	var r XfbResponse
+	_, err = Post(XfbPay+"/h5/pay/sign/getSignUrl", "", map[string]interface{}{
 		"payType":     "WXPAY",
 		"tranNo":      tranNo,
 		"signCashier": 0,
-	})
+	}, &r)
 	if err != nil {
 		return "", "", err
 	}
@@ -109,9 +103,10 @@ func GetSignUrl(tranNo string) (applyId string, jumpUrl string, err error) {
 }
 
 func QuerySignApplyById(applyId string) (int, error) {
-	r, err := PostJSON(XfbPay+"/h5/pay/sign/querySignApplyById", "", map[string]interface{}{
+	var r XfbResponse
+	_, err := Post(XfbPay+"/h5/pay/sign/querySignApplyById", "", map[string]interface{}{
 		"applyId": applyId,
-	})
+	}, &r)
 	if err != nil {
 		return 0, err
 	}
@@ -128,17 +123,19 @@ func QuerySignApplyById(applyId string) (int, error) {
 }
 
 func PayChoose(tranNo string) error {
-	_, err := PostJSON(XfbPay+"/pay/unified/choose.shtml", "", map[string]interface{}{
+	var r XfbResponse
+	_, err := Post(XfbPay+"/pay/unified/choose.shtml", "", map[string]interface{}{
 		"tranNo":    tranNo,
 		"payType":   "WXPAY",
 		"bussiCode": "WXSIGN",
-	})
+	}, &r)
 	return err
 }
 
 func DoPay(tranNo string) error {
-	_, err := PostJSON(XfbPay+"/pay/doPay", "", map[string]interface{}{
+	var r XfbResponse
+	_, err := Post(XfbPay+"/pay/doPay", "", map[string]interface{}{
 		"tranNo": tranNo,
-	})
+	}, &r)
 	return err
 }
