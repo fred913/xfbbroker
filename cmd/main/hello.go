@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/yiffyi/gorad/notification"
 	"github.com/yiffyi/xfbbroker"
 	"github.com/yiffyi/xfbbroker/xfb"
 )
@@ -78,6 +79,7 @@ func sendNotify(key string, t *xfb.Trans) error {
 	if len(key) == 0 {
 		return nil
 	}
+	bot := notification.WeComBot{Key: key}
 	msg := map[string]interface{}{
 		"msgtype": "template_card",
 		"template_card": map[string]interface{}{
@@ -116,13 +118,14 @@ func sendNotify(key string, t *xfb.Trans) error {
 			},
 		},
 	}
-	return xfbbroker.SendWeComMsg(msg, key)
+	return bot.SendMessage(msg)
 }
 
 func sendError(key string, err error, u *xfbbroker.User) error {
 	if len(key) == 0 {
 		return nil
 	}
+	bot := notification.WeComBot{Key: key}
 	msg := map[string]interface{}{
 		"msgtype": "template_card",
 		"template_card": map[string]interface{}{
@@ -147,7 +150,7 @@ func sendError(key string, err error, u *xfbbroker.User) error {
 			},
 		},
 	}
-	return xfbbroker.SendWeComMsg(msg, key)
+	return bot.SendMessage(msg)
 }
 
 func checkTransLoop() {
@@ -155,16 +158,14 @@ func checkTransLoop() {
 	for {
 		// select {
 		// case <-ticker.C:
-		cfg.RWIterateUsers(func(u *xfbbroker.User) bool {
+		needSave := false
+		for k := range cfg.Users {
+			u, _ := cfg.GetUser(k) // ensure locking
 			if u.Enabled && u.Failed < 3 {
 				total, rows, err := xfb.CardQuerynoPage(u.SessionId, u.YmUserId, time.Now())
 				if err != nil {
 					slog.Error("CardQuerynoPage failed", "err", err)
-					u.Failed++
-					if u.Failed <= 3 {
-						sendError(u.WeComBotKey, err, u)
-					}
-					return true
+					goto fail
 				} else {
 					updated := false
 					slog.Debug("check trans", "name", u.Name, "total", total)
@@ -197,11 +198,29 @@ func checkTransLoop() {
 							continue
 						}
 					}
-					return updated
+
+					if updated {
+						goto set
+					}
 				}
+
+				// success?
+				continue
+			fail:
+				u.Failed++
+				if u.Failed <= 3 {
+					sendError(u.WeComBotKey, err, &u)
+				}
+				// fallthrough
+			set:
+				needSave = true
+				cfg.SetUser(k, u)
 			}
-			return false
-		})
+		}
+
+		if needSave {
+			cfg.Save()
+		}
 
 		<-ticker.C
 		// }
@@ -213,50 +232,57 @@ func checkBalanceLoop() {
 	for {
 		// select {
 		// case <-ticker.C:
-		cfg.RWIterateUsers(func(u *xfbbroker.User) bool {
+		needSave := false
+		for k := range cfg.Users {
+			u, _ := cfg.GetUser(k) // ensure locking
 			if u.Enabled {
 				s, err := xfb.GetCardMoney(u.SessionId, u.YmUserId)
 				if err != nil {
 					slog.Error("unable to query card balance", "err", err, "name", u.Name)
-					u.Failed++
-					if u.Failed <= 3 {
-						sendError(u.WeComBotKey, err, u)
-					}
-					return true
+					goto fail
 				}
 				if s == "- - -" {
 					slog.Info(`GetCardMoney returned "- - -"`)
-					return false
+					continue
 				}
-				balance, err := strconv.ParseFloat(s, 64)
-				if err != nil {
-					slog.Error("unable to parse card balance", "err", err, "name", u.Name, "rawbalance", s)
-					u.Failed++
-					if u.Failed <= 3 {
-						sendError(u.WeComBotKey, err, u)
+
+				{ // make goto work
+					balance, err := strconv.ParseFloat(s, 64)
+					if err != nil {
+						slog.Error("unable to parse card balance", "err", err, "name", u.Name, "rawbalance", s)
+						goto fail
 					}
-					return true
-				}
-				slog.Info("check balance", "name", u.Name, "balance", balance, "threshold", u.Threshold)
-				// fmt.Printf("%s, current: %.2f, threshold: %.2f\n", u.Name, balance, u.Threshold)
-				err = rechargeToThreshold(balance, u)
-				if err != nil {
-					slog.Error("unable to recharge card balance", "err", err, "name", u.Name, "balance", balance)
-					u.Failed++
-					if u.Failed <= 3 {
-						sendError(u.WeComBotKey, err, u)
+					slog.Info("check balance", "name", u.Name, "balance", balance, "threshold", u.Threshold)
+					// fmt.Printf("%s, current: %.2f, threshold: %.2f\n", u.Name, balance, u.Threshold)
+					err = rechargeToThreshold(balance, &u)
+					if err != nil {
+						slog.Error("unable to recharge card balance", "err", err, "name", u.Name, "balance", balance)
+						goto fail
 					}
-					return true
 				}
+
 				// success?
 
 				if u.Failed != 0 {
 					u.Failed = 0
-					return true
+					goto set
 				}
+				continue
+			fail:
+				u.Failed++
+				if u.Failed <= 3 {
+					sendError(u.WeComBotKey, err, &u)
+				}
+				// fallthrough
+			set:
+				needSave = true
+				cfg.SetUser(k, u)
 			}
-			return false
-		})
+		}
+
+		if needSave {
+			cfg.Save()
+		}
 		// case <-stop:
 		// 	return
 		// }

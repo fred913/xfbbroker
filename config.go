@@ -1,10 +1,9 @@
 package xfbbroker
 
 import (
-	"encoding/json"
-	"errors"
-	"os"
 	"sync"
+
+	"github.com/yiffyi/gorad/data"
 )
 
 type User struct {
@@ -20,8 +19,9 @@ type User struct {
 }
 
 type Config struct {
-	lock                 sync.RWMutex `json:"-"`
-	Users                []User
+	db                   *data.JSONDatabase
+	lock                 *sync.RWMutex
+	Users                map[string]User
 	LogFileName          string
 	Debug                bool
 	CheckTransInterval   int
@@ -32,38 +32,41 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
-	content, err := os.ReadFile("config.json")
-	if err != nil {
-		panic(err)
+	lock := sync.RWMutex{}
+	db := data.NewJSONDatabase("config.json", true)
+	cfg := Config{
+		db:   db,
+		lock: &lock,
 	}
 
-	var c Config
-	err = json.Unmarshal(content, &c)
-	if err != nil {
-		panic(err)
-	}
-
-	return &c
+	db.LoadInto(&cfg)
+	return &cfg
 }
 
-// need to be protected by lock
-func (c *Config) save() {
-	content, err := json.MarshalIndent(c, "", "    ")
-	if err != nil {
-		panic(err)
-	}
+func (c *Config) Save() {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	c.db.Save(c)
 
-	err = os.WriteFile("config.json", content, os.ModePerm)
-	if err != nil {
-		panic(err)
-	}
+}
+
+func (c *Config) GetUser(k string) (User, bool) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	u, ok := c.Users[k]
+	return u, ok
+}
+
+func (c *Config) SetUser(k string, v User) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.Users[k] = v
 }
 
 // return a copy of User
 func (c *Config) SelectUserFromSessionId(session string) *User {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-
 	for _, u := range c.Users {
 		if u.SessionId == session {
 			// u is already a copy of struct
@@ -71,43 +74,4 @@ func (c *Config) SelectUserFromSessionId(session string) *User {
 		}
 	}
 	return nil
-}
-
-func (c *Config) ReplaceUserBySessionId(session string, u *User) error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	for k := range c.Users {
-		if c.Users[k].SessionId == session {
-			// u is already a copy of struct
-			c.Users[k] = *u
-			c.save()
-
-			return nil
-		}
-	}
-
-	return errors.New("could not found user with sessionId=" + session)
-}
-
-// func(*user) changed
-func (c *Config) RWIterateUsers(fn func(*User) bool) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	for k, u := range c.Users {
-		if fn(&u) {
-			// u is already a copy of struct
-			c.Users[k] = u
-		}
-	}
-	c.save()
-}
-
-func (c *Config) AppendUser(u *User) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	c.Users = append(c.Users, *u)
-	c.save()
 }

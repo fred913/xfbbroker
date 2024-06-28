@@ -2,7 +2,6 @@ package xfbbroker
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 
@@ -60,20 +59,13 @@ func (s *ApiServer) handleAuth(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		} else {
-			found := false
-			var u *User = nil
-			s.cfg.RWIterateUsers(func(u *User) bool {
-				if u.YmUserId == q.Get("ymUserId") {
-					u.SessionId = sess
-					u.Failed = 0
-					found = true
-					return true
-				}
-				return false
-			})
-
-			if !found {
-				u = &User{
+			u, ok := s.cfg.GetUser(data["id"].(string))
+			if ok {
+				u.SessionId = sess
+				u.Failed = 0
+				w.WriteHeader(http.StatusOK)
+			} else {
+				u = User{
 					Name:      data["userName"].(string),
 					OpenId:    data["thirdOpenid"].(string),
 					SessionId: sess,
@@ -81,11 +73,10 @@ func (s *ApiServer) handleAuth(w http.ResponseWriter, r *http.Request) {
 					// Threshold: 100,
 					Enabled: false,
 				}
-				s.cfg.AppendUser(u)
 				w.WriteHeader(http.StatusCreated)
-			} else {
-				w.WriteHeader(http.StatusOK)
 			}
+			s.cfg.SetUser(u.YmUserId, u)
+			s.cfg.Save()
 		}
 	}
 }
@@ -115,27 +106,6 @@ func (s *ApiServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write(body)
 			return
-		case http.MethodPut:
-			var newUser User
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			err = json.Unmarshal(body, &newUser)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-
-			err = s.cfg.ReplaceUserBySessionId(sess, &newUser)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
 		}
 	} else {
 		http.Error(w, "no sessionId provided", http.StatusBadRequest)
