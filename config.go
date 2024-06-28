@@ -39,7 +39,7 @@ func LoadConfig() *Config {
 		lock: &lock,
 	}
 
-	db.LoadInto(&cfg)
+	db.Load(&cfg, true)
 	return &cfg
 }
 

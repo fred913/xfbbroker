@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"runtime/debug"
 
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/yiffyi/gorad"
 	"github.com/yiffyi/gorad/notification"
 	"github.com/yiffyi/xfbbroker"
 	"github.com/yiffyi/xfbbroker/xfb"
@@ -298,18 +298,11 @@ func main() {
 
 	cfg = xfbbroker.LoadConfig()
 
-	logFile, err := os.OpenFile(cfg.LogFileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
-	if err != nil {
-		panic(err)
-	}
-	defer logFile.Close()
-
-	opts := &slog.HandlerOptions{}
+	level := slog.LevelInfo
 	if cfg.Debug {
-		opts.Level = slog.LevelDebug
+		level = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(logFile, opts))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(gorad.NewTextFileSlogHandler(cfg.LogFileName, level)))
 	// stop := make(chan bool)
 
 	go checkBalanceLoop()
