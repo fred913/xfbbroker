@@ -308,7 +308,9 @@ func main() {
 	go checkBalanceLoop()
 	go checkTransLoop()
 
-	// http.ListenAndServeTLS(config.ListenAddr, "cert.pem", "key.pem", nil)
-	http.ListenAndServe(cfg.ListenAddr, xfbbroker.CreateApiServer(cfg))
-	fmt.Println("Hello, World!")
+	if cfg.ListenTLS {
+		http.ListenAndServeTLS(cfg.ListenAddr, cfg.TLSCertFile, cfg.TLSKeyFile, xfbbroker.CreateApiServer(cfg))
+	} else {
+		http.ListenAndServe(cfg.ListenAddr, xfbbroker.CreateApiServer(cfg))
+	}
 }
