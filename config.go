@@ -27,6 +27,9 @@ type Config struct {
 	CheckTransInterval   int
 	CheckBalanceInterval int
 	ListenAddr           string
+	ListenTLS            bool
+	TLSCertFile          string
+	TLSKeyFile           string
 	AuthLocalUrl         string
 	AuthCallback         string
 }
