@@ -1,6 +1,7 @@
 package xfb
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,24 @@ func GetUserById(token, ymId string) (sessionId string, data map[string]interfac
 		return "", nil, err
 	}
 	data = r.Data.(map[string]interface{})
+	return
+}
+
+func GetUserDefaultLoginInfo(sessionId string) (data *UserDefaultLoginInfo, newSessionId string, err error) {
+	var r XfbResponse
+	newSessionId, err = Post(XfbWebApp+"/user/defaultLogin", sessionId, map[string]interface{}{
+		"platform": "WECHAT_H5",
+	}, &r)
+	if err != nil {
+		slog.Error("GetUserDefaultLoginInfo", "err", err)
+		return nil, "", err
+	}
+	data = &UserDefaultLoginInfo{}
+	mData, err := json.Marshal(r.Data)
+	if err != nil {
+		return nil, "", err
+	}
+	err = json.Unmarshal(mData, data)
 	return
 }
 

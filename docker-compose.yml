@@ -4,6 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./config.json:/app/config.json:ro
+      - ./config.json:/app/config.json
     ports:
       - "8000:8000"
