@@ -2,6 +2,7 @@ package xfbbroker
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 
@@ -143,6 +144,67 @@ func (s *ApiServer) handleSignpay(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *ApiServer) handleGetCards(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+	// require sessionId
+	q := r.URL.Query()
+	sess := q.Get("sessionId")
+	if len(sess) > 0 {
+		user := s.cfg.SelectUserFromSessionId(sess)
+		if user == nil {
+			http.Error(w, "user with sessionId="+sess+" not found", http.StatusNotFound)
+			return
+		}
+
+		if !user.Enabled {
+			http.Error(w, "user disabled", http.StatusForbidden)
+			return
+		}
+		// get card info, balance
+		s, newSessionId, err := xfb.GetUserDefaultLoginInfo(user.SessionId)
+		if err != nil {
+			http.Error(w, "unable to get user default login info: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if newSessionId != "" {
+			user.SessionId = newSessionId
+		}
+
+		balance, err := xfb.GetCardMoney(user.SessionId, user.YmUserId)
+		if err != nil {
+			http.Error(w, "unable to query card balance: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if balance == "- - -" {
+			slog.Info(`GetCardMoney returned "- - -"`)
+		}
+
+		slog.Info("Got user card info", "Username", user.Name, "Organization", s.SchoolName, "UserType", s.UserType, "Balance", balance)
+		res := map[string]any{
+			"schoolName": s.SchoolName,
+			"userType":   s.UserType,
+			"balance":    balance,
+			"userName":   s.UserName,
+		}
+		resArr := []map[string]any{}
+		resArr = append(resArr, res)
+
+		resBuf, err := json.MarshalIndent(resArr, "", "    ")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(resBuf)
+	}
+}
+
 var codepayInstances = make(map[string]*xfb.QrPayCode)
 
 type CodePayCreateResponse struct {
@@ -256,7 +318,7 @@ func CreateApiServer(cfg *Config) *mux.Router {
 	r.HandleFunc("/_/config", s.handleConfig).Methods(http.MethodGet, http.MethodPut, http.MethodOptions)
 
 	// For integrations:
-
+	r.HandleFunc("/api/v1/cards", s.handleGetCards).Methods(http.MethodGet, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/create", s.handleCodepayCreate).Methods(http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/query", s.handleCodepayQuery).Methods(http.MethodGet, http.MethodOptions)
 
