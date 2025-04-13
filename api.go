@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/yiffyi/xfbbroker/xfb"
@@ -215,59 +216,147 @@ type CodePayCreateResponse struct {
 	} `json:"data"`
 }
 
-func (s *ApiServer) handleCodepayCreate(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	if r.Method == http.MethodOptions {
+func (s *ApiServer) handleCodepayCreateHelper(sessionId string, w http.ResponseWriter, r *http.Request) {
+	user := s.cfg.SelectUserFromSessionId(sessionId)
+	if user == nil {
+		http.Error(w, "user with sessionId="+sessionId+" not found", http.StatusNotFound)
 		return
 	}
-	// require sessionId
-	q := r.URL.Query()
-	sess := q.Get("sessionId")
-	if len(sess) > 0 {
-		user := s.cfg.SelectUserFromSessionId(sess)
-		if user == nil {
-			http.Error(w, "user with sessionId="+sess+" not found", http.StatusNotFound)
-			return
-		}
 
-		code, err := xfb.GenerateQrPayCode(user.SessionId)
-		if err != nil {
-			resBuf, err := json.MarshalIndent(map[string]interface{}{
-				"success": false,
-				"message": "failed to generate qr code: server internal error",
-			}, "", "    ")
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write(resBuf)
-		}
-
-		res := CodePayCreateResponse{
-			Success: true,
-			Message: "success",
-			Data: struct {
-				QrCode string `json:"qrCode"`
-			}{
-				QrCode: code.QRCode,
-			},
-		}
-
-		resBuf, err := json.MarshalIndent(res, "", "    ")
+	code, err := xfb.GenerateQrPayCode(user.SessionId)
+	if err != nil {
+		// print error
+		slog.Error("failed to generate qr code", "error", err)
+		resBuf, err := json.MarshalIndent(map[string]interface{}{
+			"success": false,
+			"message": "failed to generate qr code: server internal error",
+		}, "", "    ")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Write(resBuf)
-
-		codepayInstances[code.QRCode] = code
+		return
 	}
+
+	res := CodePayCreateResponse{
+		Success: true,
+		Message: "success",
+		Data: struct {
+			QrCode string `json:"qrCode"`
+		}{
+			QrCode: code.QRCode,
+		},
+	}
+
+	resBuf, err := json.MarshalIndent(res, "", "    ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resBuf)
+
+	codepayInstances[code.QRCode] = code
+}
+
+func (s *ApiServer) handleCodepayCreate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	sess := r.URL.Query().Get("sessionId")
+	if sess == "" {
+		http.Error(w, "no sessionId provided", http.StatusBadRequest)
+		return
+	}
+	s.handleCodepayCreateHelper(sess, w, r)
+}
+
+func (s *ApiServer) handleCodepayCreatePath(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "sessionId required in path", http.StatusBadRequest)
+		return
+	}
+	s.handleCodepayCreateHelper(sessionId, w, r)
+}
+
+func (s *ApiServer) handleCodepayQueryHelper(sessionId string, w http.ResponseWriter, r *http.Request) {
+	user := s.cfg.SelectUserFromSessionId(sessionId)
+	if user == nil {
+		http.Error(w, "user with sessionId="+sessionId+" not found", http.StatusNotFound)
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "no code provided", http.StatusBadRequest)
+		return
+	}
+
+	codepay, ok := codepayInstances[code]
+	if !ok {
+		http.Error(w, "codepay instance not found", http.StatusNotFound)
+		return
+	}
+
+	res, err := codepay.GetResult()
+	if err != nil {
+		http.Error(w, "failed to query codepay: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var response map[string]interface{}
+	// check if monDealCur exists
+	if _, ok := res["monDealCur"]; ok {
+		// monDealCur exists, it's a completed deal
+		delete(codepayInstances, code)
+		response = map[string]interface{}{
+			"status":  1,
+			"message": "payment completed",
+			"money":   res["monDealCur"],
+		}
+	} else {
+		// monDealCur not exists, it's an unused payment code
+		// check 30s limit
+		if time.Now().Unix()-codepay.Creation > 30 {
+			// 30s limit exceeded, remove the codepay instance
+			delete(codepayInstances, code)
+			response = map[string]interface{}{
+				"status":  2,
+				"message": "payment code expired",
+			}
+		} else {
+			// 30s limit not exceeded, keep the codepay instance
+			response = map[string]interface{}{
+				"status":  0,
+				"message": "pending",
+			}
+		}
+	}
+
+	resBuf, err := json.MarshalIndent(response, "", "    ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resBuf)
 }
 
 func (s *ApiServer) handleCodepayQuery(w http.ResponseWriter, r *http.Request) {
@@ -276,34 +365,27 @@ func (s *ApiServer) handleCodepayQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// require sessionId
-	q := r.URL.Query()
-	sess := q.Get("sessionId")
-	if len(sess) > 0 {
-		user := s.cfg.SelectUserFromSessionId(sess)
-		if user == nil {
-			http.Error(w, "user with sessionId="+sess+" not found", http.StatusNotFound)
-			return
-		}
-
-		// require code
-		code := q.Get("code")
-		if len(code) == 0 {
-			http.Error(w, "no code provided", http.StatusBadRequest)
-			return
-		}
-
-		codepay, ok := codepayInstances[code]
-		if !ok {
-			http.Error(w, "codepay instance not found", http.StatusNotFound)
-			return
-		}
-
-		codepay.GetResult()
-
-	} else {
+	sess := r.URL.Query().Get("sessionId")
+	if sess == "" {
 		http.Error(w, "no sessionId provided", http.StatusBadRequest)
+		return
 	}
+	s.handleCodepayQueryHelper(sess, w, r)
+}
+
+func (s *ApiServer) handleCodepayQueryPath(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "sessionId required in path", http.StatusBadRequest)
+		return
+	}
+	s.handleCodepayQueryHelper(sessionId, w, r)
 }
 
 func CreateApiServer(cfg *Config) *mux.Router {
@@ -319,8 +401,14 @@ func CreateApiServer(cfg *Config) *mux.Router {
 
 	// For integrations:
 	r.HandleFunc("/api/v1/cards", s.handleGetCards).Methods(http.MethodGet, http.MethodOptions)
+
+	// Codepay endpoints
 	r.HandleFunc("/api/v1/codepay/create", s.handleCodepayCreate).Methods(http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/query", s.handleCodepayQuery).Methods(http.MethodGet, http.MethodOptions)
+
+	// Codepay endpoints with sessionId embedded in path
+	r.HandleFunc("/api/v1/codepay/{sessionId}/create", s.handleCodepayCreatePath).Methods(http.MethodGet, http.MethodPost, http.MethodOptions)
+	r.HandleFunc("/api/v1/codepay/{sessionId}/query", s.handleCodepayQueryPath).Methods(http.MethodGet, http.MethodOptions)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	return r

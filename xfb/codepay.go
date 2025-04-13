@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/png"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -22,6 +24,7 @@ type QrPayCode struct {
 	QRCode    string
 	SessionID string
 	client    *http.Client
+	Creation  int64
 }
 
 func GenerateQrPayCode(sessionId string) (*QrPayCode, error) {
@@ -31,8 +34,11 @@ func GenerateQrPayCode(sessionId string) (*QrPayCode, error) {
 		},
 	}
 
-	// form := url.Values{}
-	req, err := http.NewRequest("POST", XfbWebApp+qrCodeEndpointUrl, nil)
+	form := url.Values{
+		"platform":   []string{"WECHAT_H5"},
+		"schoolCode": []string{"20090820"}}
+
+	req, err := http.NewRequest("POST", XfbWebApp+qrCodeEndpointUrl, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +51,8 @@ func GenerateQrPayCode(sessionId string) (*QrPayCode, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		bodyCnt, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d; response body: %s", resp.StatusCode, string(bodyCnt))
 	}
 
 	var result struct {
@@ -67,6 +74,7 @@ func GenerateQrPayCode(sessionId string) (*QrPayCode, error) {
 		QRCode:    result.Data,
 		SessionID: sessionId,
 		client:    client,
+		Creation:  time.Now().Unix(),
 	}, nil
 }
 
