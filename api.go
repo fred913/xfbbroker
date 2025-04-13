@@ -388,6 +388,63 @@ func (s *ApiServer) handleCodepayQueryPath(w http.ResponseWriter, r *http.Reques
 	s.handleCodepayQueryHelper(sessionId, w, r)
 }
 
+func (s *ApiServer) handleRecentTransactions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "sessionId required in path", http.StatusBadRequest)
+		return
+	}
+
+	user := s.cfg.SelectUserFromSessionId(sessionId)
+	if user == nil {
+		http.Error(w, "user with sessionId="+sessionId+" not found", http.StatusNotFound)
+		return
+	}
+
+	_, transactions, err := xfb.CardQuerynoPage(user.SessionId, user.YmUserId, time.Now())
+	if err != nil {
+		http.Error(w, "unable to fetch recent transactions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Limit to at most 3 transactions
+	if len(transactions) > 3 {
+		transactions = transactions[len(transactions)-3:]
+	}
+
+	resBuf, err := json.MarshalIndent(transactions, "", "    ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resBuf)
+}
+
+func (s *ApiServer) handleRecentTransactionsPath(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionId := vars["sessionId"]
+	if sessionId == "" {
+		http.Error(w, "sessionId required in path", http.StatusBadRequest)
+		return
+	}
+
+	s.handleRecentTransactions(w, r)
+}
+
 func CreateApiServer(cfg *Config) *mux.Router {
 	r := mux.NewRouter()
 	s := &ApiServer{
@@ -405,10 +462,12 @@ func CreateApiServer(cfg *Config) *mux.Router {
 	// Codepay endpoints
 	r.HandleFunc("/api/v1/codepay/create", s.handleCodepayCreate).Methods(http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/query", s.handleCodepayQuery).Methods(http.MethodGet, http.MethodOptions)
+	r.HandleFunc("/api/v1/codepay/recentTransactions", s.handleRecentTransactions).Methods(http.MethodGet, http.MethodOptions)
 
 	// Codepay endpoints with sessionId embedded in path
 	r.HandleFunc("/api/v1/codepay/{sessionId}/create", s.handleCodepayCreatePath).Methods(http.MethodGet, http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/{sessionId}/query", s.handleCodepayQueryPath).Methods(http.MethodGet, http.MethodOptions)
+	r.HandleFunc("/api/v1/codepay/{sessionId}/recentTransactions", s.handleRecentTransactionsPath).Methods(http.MethodGet, http.MethodOptions)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	return r
