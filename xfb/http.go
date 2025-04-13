@@ -96,7 +96,7 @@ func PostForm(url string, sessionId string, form url.Values, v XfbBaseResponse) 
 	}
 }
 
-func Post(url string, sessionId string, payload map[string]interface{}, v XfbBaseResponse) (newSessionId string, err error) {
+func Post(url string, sessionId string, payload map[string]any, v XfbBaseResponse) (newSessionId string, err error) {
 	req, err := radhttp.NewJSONPostRequest(url, payload)
 	if err != nil {
 		return

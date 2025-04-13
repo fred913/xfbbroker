@@ -227,7 +227,7 @@ func (s *ApiServer) handleCodepayCreateHelper(sessionId string, w http.ResponseW
 	if err != nil {
 		// print error
 		slog.Error("failed to generate qr code", "error", err)
-		resBuf, err := json.MarshalIndent(map[string]interface{}{
+		resBuf, err := json.MarshalIndent(map[string]any{
 			"success": false,
 			"message": "failed to generate qr code: server internal error",
 		}, "", "    ")
@@ -319,12 +319,12 @@ func (s *ApiServer) handleCodepayQueryHelper(sessionId string, w http.ResponseWr
 		return
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	// check if monDealCur exists
 	if _, ok := res["monDealCur"]; ok {
 		// monDealCur exists, it's a completed deal
 		delete(codepayInstances, code)
-		response = map[string]interface{}{
+		response = map[string]any{
 			"status":  1,
 			"message": "payment completed",
 			"money":   res["monDealCur"],
@@ -335,13 +335,13 @@ func (s *ApiServer) handleCodepayQueryHelper(sessionId string, w http.ResponseWr
 		if time.Now().Unix()-codepay.Creation > 30 {
 			// 30s limit exceeded, remove the codepay instance
 			delete(codepayInstances, code)
-			response = map[string]interface{}{
+			response = map[string]any{
 				"status":  2,
 				"message": "payment code expired",
 			}
 		} else {
 			// 30s limit not exceeded, keep the codepay instance
-			response = map[string]interface{}{
+			response = map[string]any{
 				"status":  0,
 				"message": "pending",
 			}

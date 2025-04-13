@@ -69,7 +69,7 @@ func (q *QrPayCode) GetQrPngBuf(size int) ([]byte, error) {
 	return qr.PNG(size)
 }
 
-func (q *QrPayCode) GetResult() (map[string]interface{}, error) {
+func (q *QrPayCode) GetResult() (map[string]any, error) {
 	form := url.Values{}
 	form.Add("qrCode", q.QRCode)
 
@@ -80,7 +80,7 @@ func (q *QrPayCode) GetResult() (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	return result.Data.(map[string]interface{}), nil
+	return result.Data.(map[string]any), nil
 }
 
 // func main() {

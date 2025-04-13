@@ -80,18 +80,18 @@ func sendNotify(key string, t *xfb.Trans) error {
 		return nil
 	}
 	bot := notification.WeComBot{Key: key}
-	msg := map[string]interface{}{
+	msg := map[string]any{
 		"msgtype": "template_card",
-		"template_card": map[string]interface{}{
+		"template_card": map[string]any{
 			"card_type": "text_notice",
-			"source": map[string]interface{}{
+			"source": map[string]any{
 				"desc": "校园卡账单",
 			},
-			"main_title": map[string]interface{}{
+			"main_title": map[string]any{
 				"title": t.Address,
 				"desc":  t.FeeName,
 			},
-			"emphasis_content": map[string]interface{}{
+			"emphasis_content": map[string]any{
 				"title": formatExpense(t.Money),
 			},
 			"horizontal_content_list": []map[string]string{
@@ -112,7 +112,7 @@ func sendNotify(key string, t *xfb.Trans) error {
 					"value":   t.Time,
 				},
 			},
-			"card_action": map[string]interface{}{
+			"card_action": map[string]any{
 				"type": 1,
 				"url":  cfg.AuthLocalUrl,
 			},
@@ -126,14 +126,14 @@ func sendError(key string, err error, u *xfbbroker.User) error {
 		return nil
 	}
 	bot := notification.WeComBot{Key: key}
-	msg := map[string]interface{}{
+	msg := map[string]any{
 		"msgtype": "template_card",
-		"template_card": map[string]interface{}{
+		"template_card": map[string]any{
 			"card_type": "text_notice",
-			"source": map[string]interface{}{
+			"source": map[string]any{
 				"desc": "校园卡账单",
 			},
-			"main_title": map[string]interface{}{
+			"main_title": map[string]any{
 				"title": "请求错误",
 				"desc":  u.Name,
 			},
@@ -144,7 +144,7 @@ func sendError(key string, err error, u *xfbbroker.User) error {
 					"value":   u.YmUserId,
 				},
 			},
-			"card_action": map[string]interface{}{
+			"card_action": map[string]any{
 				"type": 1,
 				"url":  cfg.AuthLocalUrl,
 			},
