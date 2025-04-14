@@ -4,10 +4,10 @@ type XfbBaseResponse interface {
 	GetStatusCode() int
 }
 type XfbResponse struct {
-	StatusCode int         `json:"statusCode"`
-	Message    string      `json:"message"`
-	Data       interface{} `json:"data"`
-	SessionId  string      `json:"-"`
+	StatusCode int    `json:"statusCode"`
+	Message    string `json:"message"`
+	Data       any    `json:"data"`
+	SessionId  string `json:"-"`
 }
 
 func (r *XfbResponse) GetStatusCode() int {

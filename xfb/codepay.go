@@ -1,15 +1,10 @@
 package xfb
 
 import (
-	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"image/png"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -23,57 +18,29 @@ const (
 type QrPayCode struct {
 	QRCode    string
 	SessionID string
-	client    *http.Client
 	Creation  int64
 }
 
 func GenerateQrPayCode(sessionId string) (*QrPayCode, error) {
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
 	form := url.Values{
 		"platform":   []string{"WECHAT_H5"},
 		"schoolCode": []string{"20090820"}}
 
-	req, err := http.NewRequest("POST", XfbWebApp+qrCodeEndpointUrl, strings.NewReader(form.Encode()))
+	var result XfbResponse
+
+	_, err := PostForm(XfbWebApp+qrCodeEndpointUrl, sessionId, form, &result)
 	if err != nil {
 		return nil, err
 	}
 
-	req.AddCookie(&http.Cookie{Name: "shiroJID", Value: sessionId})
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyCnt, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code: %d; response body: %s", resp.StatusCode, string(bodyCnt))
-	}
-
-	var result struct {
-		Success    bool   `json:"success"`
-		StatusCode int    `json:"statusCode"`
-		Data       string `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	if !result.Success || result.StatusCode != 0 {
-		return nil, fmt.Errorf("API error: success=%v, statusCode=%d",
-			result.Success, result.StatusCode)
+	if result.StatusCode != 0 {
+		return nil, fmt.Errorf("API error: statusCode=%d, statusCode=%d",
+			result.StatusCode, result.StatusCode)
 	}
 
 	return &QrPayCode{
-		QRCode:    result.Data,
+		QRCode:    result.Data.(string),
 		SessionID: sessionId,
-		client:    client,
 		Creation:  time.Now().Unix(),
 	}, nil
 }
@@ -102,30 +69,18 @@ func (q *QrPayCode) GetQrPngBuf(size int) ([]byte, error) {
 	return qr.PNG(size)
 }
 
-func (q *QrPayCode) GetResult() (map[string]interface{}, error) {
+func (q *QrPayCode) GetResult() (map[string]any, error) {
 	form := url.Values{}
 	form.Add("qrCode", q.QRCode)
 
-	req, err := http.NewRequest("POST", XfbWebApp+qrResultEndpointUrl, strings.NewReader(form.Encode()))
+	var result XfbResponse
+
+	_, err := PostForm(XfbWebApp+qrResultEndpointUrl, q.SessionID, form, &result)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: "shiroJID", Value: q.SessionID})
-
-	resp, err := q.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return result.Data.(map[string]any), nil
 }
 
 // func main() {
