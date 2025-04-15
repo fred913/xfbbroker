@@ -145,6 +145,58 @@ func (s *ApiServer) handleSignpay(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *ApiServer) handleGetCardsHelper(sess string, w http.ResponseWriter, r *http.Request) {
+	user := s.cfg.SelectUserFromSessionId(sess)
+	if user == nil {
+		http.Error(w, "user with sessionId="+sess+" not found", http.StatusNotFound)
+		return
+	}
+
+	if !user.Enabled {
+		http.Error(w, "user disabled", http.StatusForbidden)
+		return
+	}
+	// get card info, balance
+	dlInfo, newSessionId, err := xfb.GetUserDefaultLoginInfo(user.SessionId)
+	if err != nil {
+		http.Error(w, "unable to get user default login info: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if newSessionId != "" {
+		user.SessionId = newSessionId
+	}
+
+	balance, err := xfb.GetCardMoney(user.SessionId, user.YmUserId)
+	if err != nil {
+		http.Error(w, "unable to query card balance: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if balance == "- - -" {
+		slog.Info(`GetCardMoney returned "- - -"`)
+	}
+
+	slog.Info("Got user card info", "Username", user.Name, "Organization", dlInfo.SchoolName, "UserType", dlInfo.UserType, "Balance", balance)
+	res := map[string]any{
+		"schoolName": dlInfo.SchoolName,
+		"userType":   dlInfo.UserType,
+		"balance":    balance,
+		"userName":   dlInfo.UserName,
+	}
+	resArr := []map[string]any{}
+	resArr = append(resArr, res)
+
+	resBuf, err := json.MarshalIndent(resArr, "", "    ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resBuf)
+}
+
 func (s *ApiServer) handleGetCards(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == http.MethodOptions {
@@ -154,55 +206,9 @@ func (s *ApiServer) handleGetCards(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sess := q.Get("sessionId")
 	if len(sess) > 0 {
-		user := s.cfg.SelectUserFromSessionId(sess)
-		if user == nil {
-			http.Error(w, "user with sessionId="+sess+" not found", http.StatusNotFound)
-			return
-		}
-
-		if !user.Enabled {
-			http.Error(w, "user disabled", http.StatusForbidden)
-			return
-		}
-		// get card info, balance
-		s, newSessionId, err := xfb.GetUserDefaultLoginInfo(user.SessionId)
-		if err != nil {
-			http.Error(w, "unable to get user default login info: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if newSessionId != "" {
-			user.SessionId = newSessionId
-		}
-
-		balance, err := xfb.GetCardMoney(user.SessionId, user.YmUserId)
-		if err != nil {
-			http.Error(w, "unable to query card balance: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if balance == "- - -" {
-			slog.Info(`GetCardMoney returned "- - -"`)
-		}
-
-		slog.Info("Got user card info", "Username", user.Name, "Organization", s.SchoolName, "UserType", s.UserType, "Balance", balance)
-		res := map[string]any{
-			"schoolName": s.SchoolName,
-			"userType":   s.UserType,
-			"balance":    balance,
-			"userName":   s.UserName,
-		}
-		resArr := []map[string]any{}
-		resArr = append(resArr, res)
-
-		resBuf, err := json.MarshalIndent(resArr, "", "    ")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(resBuf)
+		s.handleGetCardsHelper(sess, w, r)
+	} else {
+		http.Error(w, "no sessionId provided", http.StatusBadRequest)
 	}
 }
 
@@ -442,7 +448,25 @@ func (s *ApiServer) handleRecentTransactionsPath(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// TODO fix the logic here, make the recentTransactions without sessionId embedded in path work
+
 	s.handleRecentTransactions(w, r)
+}
+
+func (s *ApiServer) handleCardInfoPath(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	vars := mux.Vars(r)
+	sess := vars["sessionId"]
+	if sess == "" {
+		http.Error(w, "sessionId required in path", http.StatusBadRequest)
+		return
+	}
+
+	s.handleGetCardsHelper(sess, w, r)
 }
 
 func CreateApiServer(cfg *Config) *mux.Router {
@@ -465,6 +489,7 @@ func CreateApiServer(cfg *Config) *mux.Router {
 	r.HandleFunc("/api/v1/codepay/recentTransactions", s.handleRecentTransactions).Methods(http.MethodGet, http.MethodOptions)
 
 	// Codepay endpoints with sessionId embedded in path
+	r.HandleFunc("/api/v1/codepay/{sessionId}/info", s.handleCardInfoPath).Methods(http.MethodGet, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/{sessionId}/create", s.handleCodepayCreatePath).Methods(http.MethodGet, http.MethodPost, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/{sessionId}/query", s.handleCodepayQueryPath).Methods(http.MethodGet, http.MethodOptions)
 	r.HandleFunc("/api/v1/codepay/{sessionId}/recentTransactions", s.handleRecentTransactionsPath).Methods(http.MethodGet, http.MethodOptions)
